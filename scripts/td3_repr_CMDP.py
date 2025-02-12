@@ -10,14 +10,16 @@ import time
 import wandb
 
 from fcsrl.agent import TD3LagReprAgent
+from fcsrl.env.gym_utils import DomainRandomizationWrapper
 from fcsrl.trainer import offpolicy_trainer
 from fcsrl.data import Collector, ReplayBuffer
 from fcsrl.env import SubprocVectorEnv, GoalWrapper, ActionRepeatWrapper
 from fcsrl.utils import DeviceConfig, set_seed, BaseNormalizer, MeanStdNormalizer, dict2attr
 
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env_name', type=str)
+    parser.add_argument('--env_name', type=str, default='SafetyPointGoal1Gymnasium-v0')
     parser.add_argument('--test', action='store_true')
     parser.add_argument('--render_path', type=str)
     parser.add_argument('--hyperparams', type=str, default='hyper_params/TD3Repr_Lag.yaml')
@@ -35,7 +37,7 @@ def main():
         cfg_dict["misc"]["test"] = args.test
         cfg_dict["network"]["repr_type"] = args.repr_type
     config = dict2attr(cfg_dict)
-    
+
     env_cfg = config.env
     trainer_cfg = config.trainer
     lagrg_cfg = config.Lagrangian
@@ -46,12 +48,24 @@ def main():
     config.network.a_dim = np.prod(env.action_space.shape) or env.action_space.n
     config.agent.action_range = [env.action_space.low[0], env.action_space.high[0]]
 
-    train_env_fn = lambda: ActionRepeatWrapper(GoalWrapper(gym.make(env_cfg.name)), 4)
-    test_env_fn = lambda: ActionRepeatWrapper(gym.make(env_cfg.name), 4)
-    train_envs = SubprocVectorEnv(
-        [train_env_fn for _ in range(env_cfg.num_env_train)])
-    test_envs = SubprocVectorEnv(
-        [test_env_fn for _ in range(env_cfg.num_env_test)])
+    def make_single_env(train=True):
+        base = gym.make(env_cfg.name)
+        base = GoalWrapper(base)
+        if train:
+            base = DomainRandomizationWrapper(base,
+                                              friction_range=env_cfg.friction_range,
+                                              noise_range=env_cfg.noise_range)
+        base = ActionRepeatWrapper(base, 4)
+        return base
+
+    # train_env_fn = lambda: ActionRepeatWrapper(GoalWrapper(gym.make(env_cfg.name)), 4)
+    # test_env_fn = lambda: ActionRepeatWrapper(gym.make(env_cfg.name), 4)
+
+    train_env_fn = lambda: make_single_env(train=True)
+    test_env_fn = lambda: make_single_env(train=False)
+
+    train_envs = SubprocVectorEnv([train_env_fn for _ in range(env_cfg.num_env_train)])
+    test_envs = SubprocVectorEnv([test_env_fn for _ in range(env_cfg.num_env_test)])
 
     # seed
     set_seed(misc_cfg.seed)
@@ -61,17 +75,18 @@ def main():
 
     normalizer = MeanStdNormalizer() if config.agent.obs_normalizer == "MeanStdNormalizer" else BaseNormalizer()
     agent = TD3LagReprAgent(config, obs_normalizer=normalizer)
-    
+
     # save model
     os.makedirs(f"{trainer_cfg.model_dir}/{env_cfg.name}", 0o777, exist_ok=True)
     save_path = f"{trainer_cfg.model_dir}/{env_cfg.name}/td3lag_{args.repr_type}_seed_{misc_cfg.seed}"
 
     def stop_fn(r):
-        return False # r > env.spec.reward_threshold
+        return False  # r > env.spec.reward_threshold
 
     if not misc_cfg.test:
         # collector
-        train_collector = Collector(agent, train_envs, ReplayBuffer(config.trainer.replay_size), act_space=env.action_space)
+        train_collector = Collector(agent, train_envs, ReplayBuffer(config.trainer.replay_size),
+                                    act_space=env.action_space)
         test_collector = Collector(agent, test_envs)
 
         # logger
@@ -85,7 +100,8 @@ def main():
                 "seed": misc_cfg.seed,
                 "method": f"td3_lag",
                 "repr_type": args.repr_type,
-            }
+            },
+            mode="online",
         )
 
         if not lagrg_cfg.schedule_threshold:
@@ -99,13 +115,13 @@ def main():
 
         # trainer and start training
         if lagrg_cfg.update_by_J:
-            metric_convert_fn = None 
-        else: 
+            metric_convert_fn = None
+        else:
             raise NotImplementedError("Lagrangian update by Q function is not supported.")
-        
+
         result = offpolicy_trainer(
-            agent, 
-            train_collector, 
+            agent,
+            train_collector,
             test_collector,
             trainer_cfg.warmup_episode,
             trainer_cfg.epoch,
@@ -115,15 +131,16 @@ def main():
             trainer_cfg.test_episode,
             threshold,
             metric_convert_fn,
-            save_path, 
-            stop_fn, 
+            save_path,
+            stop_fn,
         )
 
         train_collector.close()
         test_collector.close()
-    
+
     else:
         pass
+
 
 if __name__ == "__main__":
     main()

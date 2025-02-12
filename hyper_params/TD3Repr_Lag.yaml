@@ -27,10 +27,12 @@ network:
     repr_type: "FCSRL"
 
 env:
-    name: "SafetyPointGoal1Gymnasium-v0"
-    num_env_train: 8 
-    num_env_test: 10
-    max_episode_len: 1000
+  name: "SafetyPointGoal1Gymnasium-v0"
+  num_env_train: 8
+  num_env_test: 10
+  max_episode_len: 1000
+  friction_range: [0.8, 1.2]
+  noise_range: [0.0, 0.1]
 
 trainer:
     replay_size: 200000
