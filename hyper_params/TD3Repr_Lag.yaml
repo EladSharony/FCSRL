@@ -62,6 +62,6 @@ Lagrangian:
 
 misc:
     seed: 1000
-    cudaid: -1
+    cudaid: 0
     render: 0.0
     test: False

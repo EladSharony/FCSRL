@@ -19,23 +19,45 @@ from fcsrl.utils import DeviceConfig, set_seed, BaseNormalizer, MeanStdNormalize
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env_name', type=str, default='SafetyPointGoal1Gymnasium-v0')
+    # parser.add_argument('--env_name', type=str, default='SafetyPointGoal1Gymnasium-v0')
     parser.add_argument('--test', action='store_true')
-    parser.add_argument('--render_path', type=str)
     parser.add_argument('--hyperparams', type=str, default='hyper_params/TD3Repr_Lag.yaml')
     parser.add_argument('--seed', type=int, default=100)
-    parser.add_argument('--cudaid', type=int, default=-1)
+    parser.add_argument('--cudaid', type=int, default=0)
     parser.add_argument('--repr_type', type=str, default="FCSRL")
+
     args = parser.parse_args()
+
+    wandb.init(
+        project="FCSRL",
+        # group, name, etc. can also be set from the sweep config if you prefer
+        config={
+            "seed": args.seed,
+            "repr_type": args.repr_type,
+        },
+    )
+
+    dom_rand = (wandb.config.domain_randomization == "true")
+
+    if dom_rand:
+        friction_range = [0.8, 1.2]
+        noise_range = [0.0, 0.1]
+    else:
+        friction_range = [1.0, 1.0]
+        noise_range = [0.0, 0.0]
 
     DeviceConfig().select_device(args.cudaid)
 
     with open(args.hyperparams, 'r') as f:
         cfg_dict = yaml.safe_load(f)
-        cfg_dict["env"]["name"] = args.env_name
-        cfg_dict["misc"]["seed"] = args.seed
-        cfg_dict["misc"]["test"] = args.test
-        cfg_dict["network"]["repr_type"] = args.repr_type
+        cfg_dict["env"]["name"] = wandb.config.env_name  # override with wandb config
+        cfg_dict["misc"]["seed"] = wandb.config.seed
+        cfg_dict["network"]["repr_type"] = wandb.config.repr_type
+
+        # override friction / noise ranges from wandb.config
+        cfg_dict["env"]["friction_range"] = [friction_range[0], friction_range[1]]
+        cfg_dict["env"]["noise_range"] = [noise_range[0], noise_range[1]]
+
     config = dict2attr(cfg_dict)
 
     env_cfg = config.env
@@ -88,21 +110,6 @@ def main():
         train_collector = Collector(agent, train_envs, ReplayBuffer(config.trainer.replay_size),
                                     act_space=env.action_space)
         test_collector = Collector(agent, test_envs)
-
-        # logger
-        wandb.init(
-            project="FCSRL",
-            # entity="", use your ID
-            group="main",
-            name=f"{env_cfg.name}",
-            config={
-                "env_name": env_cfg.name,
-                "seed": misc_cfg.seed,
-                "method": f"td3_lag",
-                "repr_type": args.repr_type,
-            },
-            mode="online",
-        )
 
         if not lagrg_cfg.schedule_threshold:
             threshold = lagrg_cfg.constraint_threshold

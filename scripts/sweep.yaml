@@ -1,0 +1,23 @@
+command:
+  - ${env}
+  - python
+  - ${program}
+method: grid
+metric:
+  name: test/best_reward
+  goal: maximize
+
+parameters:
+  seed:
+    values: [0, 1, 2]
+  domain_randomization:
+    values: [true, false]
+
+  env_name:
+    values: ["SafetyPointButton1Gymnasium-v0",
+             "SafetyPointPush1Gymnasium-v0",
+             "SafetyPointGoal2Gymnasium-v0",
+             "SafetyCarGoal1Gymnasium-v0",
+             "SafetyCarButton1Gymnasium-v0",]
+
+program: scripts/td3_repr_CMDP.py
